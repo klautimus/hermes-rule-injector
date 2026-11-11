@@ -104,14 +104,31 @@ auxiliary:
 
 `propose.py` turns a correction ("no, that's wrong because…") into a draft rule with a trigger and an inject block, which you review before it lands. The useful part isn't generation, it's the review step: seeing a rule as `{trigger, inject}` makes vague rules obviously vague.
 
-## CLI and dashboard
+## CLI
 
 ```bash
 python cli.py list                     # every rule, hook, priority, enabled
 python cli.py trace --tail 50          # what fired this session and why
 ```
 
-`dashboard/` ships a small read-only web view of the rule set and the trace log.
+## Web dashboard
+
+A local web view of the rule set and the live activation trace. It reads
+`rules.json` and the trace log from disk, so it works as a standalone viewer
+whether or not a gateway is running.
+
+```bash
+pip install fastapi uvicorn      # the only optional dependency in the project
+python3 dashboard.py --port 9123
+# → http://127.0.0.1:9123
+```
+
+![dashboard](docs/dashboard.png)
+
+Server-rendered, no JS build step. Endpoints: `/api/status`, `/api/rules`,
+`/api/trace?limit=N`. It is read-only by design — an outside process cannot
+mutate the adjudicator's in-memory state, so the dashboard shows it rather
+than pretending to toggle it.
 
 ## Limitations — read these before installing
 
@@ -121,6 +138,8 @@ python cli.py trace --tail 50          # what fired this session and why
 - **Rules are global to the profile.** Per-project rule sets need a separate profile or a path-scoped trigger; there is no first-class project scoping yet.
 - **The adjudicator is a second model reading your turn.** If you enable it, that content goes to whichever provider you configured. Leave it off if that matters.
 - **No rule versioning/rollback UI.** `rules.json` is a file; use git.
+- **The dashboard is read-only over HTTP.** It reads `rules.json` and the trace log from disk, so it cannot change adjudicator state that lives inside a running gateway process. Editing rules from the browser is not implemented.
+- **The dashboard adds `fastapi` + `uvicorn`.** Only if you run it; the plugin itself imports neither, and loads without them.
 - Tested on Hermes 0.21.x, Linux/WSL. Not tested on macOS or the Desktop app.
 
 ## Disclosure
