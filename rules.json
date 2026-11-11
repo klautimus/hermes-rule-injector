@@ -1,0 +1,208 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "always-think-before-acting",
+      "name": "Always Think Before Acting",
+      "description": "Unconditional pre_llm_call guard that forces a reasoning block before any response and between tool calls. The cheapest rule in the set and the one that catches the most: most bad agent turns are un-reasoned turns.",
+      "enabled": true,
+      "hook": "pre_llm_call",
+      "priority": 0,
+      "trigger": {
+        "type": "always"
+      },
+      "inject": {
+        "context": "[HARD RULE: Always Think Before Acting]\nProduce your reasoning before every response and before and after every tool call. Do not skip reasoning on turns that look simple — the turn that skips it is the one that fails."
+      },
+      "created_at": "2026-11-11T00:00:00Z",
+      "updated_at": "2026-11-11T00:00:00Z",
+      "domain": "",
+      "applicable_when": [],
+      "not_applicable_when": [],
+      "safety_critical": true,
+      "auto_created": false,
+      "auto_created_source": "",
+      "auto_created_at": ""
+    },
+    {
+      "id": "no-placeholders",
+      "name": "No Placeholders — Build It, Don't Stub",
+      "description": "Fires on any implementation context. Refuses stub functions, TODO bodies, fake fallbacks and 'phase 2' deferrals: build the missing piece, or say plainly that it is unbuilt.",
+      "enabled": true,
+      "hook": "pre_llm_call",
+      "priority": 1,
+      "trigger": {
+        "type": "compound",
+        "operator": "or",
+        "conditions": [
+          {
+            "type": "keyword",
+            "scope": "latest_user_message",
+            "keywords": [
+              "implement",
+              "build",
+              "code",
+              "function",
+              "module",
+              "endpoint",
+              "feature",
+              "fix",
+              "stub",
+              "placeholder",
+              "wire"
+            ]
+          },
+          {
+            "type": "tool_name",
+            "tool_names": [
+              "write_file",
+              "patch",
+              "execute_code",
+              "terminal"
+            ]
+          }
+        ]
+      },
+      "inject": {
+        "context": "[HARD RULE: No Placeholders]\nNever ship a stub, a TODO body, a silently-degrading try/except, or a 'phase 2' deferral in place of working code. Build the real data path. If something genuinely cannot be built in this turn, say it is unbuilt — do not leave a fake that compiles."
+      },
+      "created_at": "2026-11-11T00:00:00Z",
+      "updated_at": "2026-11-11T00:00:00Z",
+      "domain": "software",
+      "applicable_when": [],
+      "not_applicable_when": [],
+      "safety_critical": true,
+      "auto_created": false,
+      "auto_created_source": "",
+      "auto_created_at": ""
+    },
+    {
+      "id": "verify-before-claiming",
+      "name": "Verify Before Claiming",
+      "description": "pre_verify gate. Blocks completion while the turn's own tool output contradicts the claim, and reminds the agent to re-read its evidence instead of trusting a subagent's self-report.",
+      "enabled": true,
+      "hook": "pre_verify",
+      "priority": 5,
+      "trigger": {
+        "type": "keyword",
+        "scope": "recent_context",
+        "keywords": [
+          "done",
+          "complete",
+          "fixed",
+          "working",
+          "verified",
+          "tested",
+          "passing",
+          "deployed",
+          "shipped"
+        ]
+      },
+      "inject": {
+        "context": "[HARD RULE: Verify Before Claiming]\nBefore you report a thing as done, fixed, working or tested, point at the tool output that proves it in this turn. A subagent's summary is a claim, not evidence. A green test run is evidence only about what it actually compiled and ran."
+      },
+      "created_at": "2026-11-11T00:00:00Z",
+      "updated_at": "2026-11-11T00:00:00Z",
+      "domain": "",
+      "applicable_when": [],
+      "not_applicable_when": [],
+      "safety_critical": true,
+      "auto_created": false,
+      "auto_created_source": "",
+      "auto_created_at": ""
+    },
+    {
+      "id": "read-the-source-not-the-memory",
+      "name": "Read the Source, Not the Recollection",
+      "description": "Fires when a turn states a constant, limit, key name or API shape. Forces the value to come from the file or docs rather than from recall.",
+      "enabled": true,
+      "hook": "pre_llm_call",
+      "priority": 12,
+      "trigger": {
+        "type": "keyword",
+        "scope": "latest_user_message",
+        "keywords": [
+          "limit",
+          "budget",
+          "cap",
+          "threshold",
+          "constant",
+          "config",
+          "setting",
+          "maximum",
+          "how many",
+          "what is the"
+        ]
+      },
+      "inject": {
+        "context": "[HARD RULE: Read the Source]\nNever state a limit, threshold, config key or API shape from memory. Read it from the file or the official docs in this turn, and quote where it came from. A remembered constant is a guess wearing a number."
+      },
+      "created_at": "2026-11-11T00:00:00Z",
+      "updated_at": "2026-11-11T00:00:00Z",
+      "domain": "",
+      "applicable_when": [],
+      "not_applicable_when": [],
+      "safety_critical": false,
+      "auto_created": false,
+      "auto_created_source": "",
+      "auto_created_at": ""
+    },
+    {
+      "id": "tool-result-lies-are-signal",
+      "name": "A Failing Tool Repeated Verbatim Means the Call Shape Is Wrong",
+      "description": "transform_tool_result guard. When an error repeats unchanged, the argument shape is wrong, not the value. Stops the retry loop that burns a turn.",
+      "enabled": true,
+      "hook": "transform_tool_result",
+      "priority": 20,
+      "trigger": {
+        "type": "tool_error"
+      },
+      "inject": {
+        "context": "[HARD RULE: Change the Shape, Not the Value]\nA tool error that repeats verbatim means the call form is wrong. Do not retry it with different values. Change the tool, the argument shape, or the approach."
+      },
+      "created_at": "2026-11-11T00:00:00Z",
+      "updated_at": "2026-11-11T00:00:00Z",
+      "domain": "",
+      "applicable_when": [],
+      "not_applicable_when": [],
+      "safety_critical": false,
+      "auto_created": false,
+      "auto_created_source": "",
+      "auto_created_at": ""
+    },
+    {
+      "id": "disclosed-gap-is-not-delivery",
+      "name": "A Disclosed Gap Is a Gap",
+      "description": "pre_verify gate against the limitations-list ending. Naming an unfinished piece as a caveat is not delivering it; build it, or state the next action already taken.",
+      "enabled": true,
+      "hook": "pre_verify",
+      "priority": 6,
+      "trigger": {
+        "type": "keyword",
+        "scope": "recent_context",
+        "keywords": [
+          "not implemented",
+          "not built",
+          "limitation",
+          "known issue",
+          "out of scope",
+          "future work",
+          "still missing",
+          "caveat"
+        ]
+      },
+      "inject": {
+        "context": "[HARD RULE: A Disclosed Gap Is a Gap]\nA 'known limitations' section that names unfinished work and stops is delivery of something unfinished. Build it now, or present it as open work with the next action already taken — never as a conclusion."
+      },
+      "created_at": "2026-11-11T00:00:00Z",
+      "updated_at": "2026-11-11T00:00:00Z",
+      "domain": "",
+      "applicable_when": [],
+      "not_applicable_when": [],
+      "safety_critical": false,
+      "auto_created": false,
+      "auto_created_source": "",
+      "auto_created_at": ""
+    }
+  ]
+}

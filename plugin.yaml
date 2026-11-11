@@ -1,0 +1,12 @@
+name: rule-injector
+version: 1.0.0
+description: "Contextual hard-rule injection via pre_llm_call, transform_tool_result, and pre_verify hooks. Moves SOUL.md rules from system-prompt (where they wash out) to the point of need."
+author: ""
+hooks:
+  - pre_llm_call
+  - transform_tool_result
+  - pre_verify
+provides_hooks:
+  - pre_llm_call
+  - transform_tool_result
+  - pre_verify

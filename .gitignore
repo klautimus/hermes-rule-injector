@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.egg-info/
+
+# Rule backups / local rulesets
+rules.backup*.json
+rules.json.bak*
+*.local.json
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
