@@ -91,14 +91,15 @@ This repo ships six starter rules in `rules.json` to show the shape. Replace the
 
 Keyword matching is precise and dumb: it misses paraphrases and it fires on incidental mentions. The optional adjudicator adds a second, semantic pass for the ambiguous cases — a cheap auxiliary model reviews the candidate rule against the turn and decides fire / don't fire, with the decisions trace-logged so you can audit why a rule did or didn't apply.
 
-It is **disabled by default** and costs one auxiliary model call per ambiguous turn when enabled. Enable it in `~/.hermes/config.yaml`:
+It is **disabled by default** and costs one model call per ambiguous turn when enabled. Enable it in `~/.hermes/config.yaml`:
 
 ```yaml
 auxiliary:
   adjudicator:
-    provider: deepseek        # any configured provider
-    model: deepseek-flash
+    enabled: true
 ```
+
+The call goes through **`ctx.llm.complete`** — Hermes' host-owned LLM facade — so it runs on whatever model the session is actually using, with Hermes' own credentials and budget. The plugin holds no key and never imports an internal client module. Overriding the provider or model per plugin is deliberately not done by default: that is gated behind the host's per-plugin trust flags (`plugins.entries.rule-injector.llm.allow_provider_override` / `allow_model_override`), and a plugin that hardcodes its own provider is a plugin that ignores the user's configuration.
 
 ## Auto-drafting rules from corrections
 
@@ -136,7 +137,8 @@ than pretending to toggle it.
 - **Injections cost tokens.** Every fired rule adds text to the turn. The budget keeps it bounded, but a rule set of 150+ rules with loose triggers will visibly raise input tokens.
 - **It changes model behaviour, not model capability.** A bad rule produces confident wrong behaviour more reliably.
 - **Rules are global to the profile.** Per-project rule sets need a separate profile or a path-scoped trigger; there is no first-class project scoping yet.
-- **The adjudicator is a second model reading your turn.** If you enable it, that content goes to whichever provider you configured. Leave it off if that matters.
+- **The adjudicator is a second model reading your turn.** If you enable it, the current turn is sent to whatever model the session is running on. Leave it off if that matters.
+- **Semantic triggers download a model.** Rules whose trigger type is `semantic` use `sentence-transformers`, which fetches its embedding model (~80 MB) from Hugging Face into the usual cache on first use. Without that package, or without network access at that moment, semantic rules fall back to no-match rather than failing the turn.
 - **No rule versioning/rollback UI.** `rules.json` is a file; use git.
 - **The dashboard is read-only over HTTP.** It reads `rules.json` and the trace log from disk, so it cannot change adjudicator state that lives inside a running gateway process. Editing rules from the browser is not implemented.
 - **The dashboard adds `fastapi` + `uvicorn`.** Only if you run it; the plugin itself imports neither, and loads without them.
@@ -146,7 +148,8 @@ than pretending to toggle it.
 
 - **Reads:** `rules.json` in the plugin directory, and the plugin's own trace log.
 - **Writes:** `~/.hermes/logs/rule-injector-trace.jsonl` (one line per activation), and `rules.json` when a rule is created or edited through the CLI/propose path.
-- **Network:** none by default. If the adjudicator or the semantic matcher is enabled, it calls the provider you configured, using Hermes's own auxiliary client and credentials — the plugin stores no keys and reads no `.env`, `auth.json` or other credential store.
+- **Network:** none by default. Two opt-ins reach the network: the adjudicator (one completion per ambiguous turn, through `ctx.llm.complete`, on the session's own model) and `semantic` triggers (a one-time sentence-transformers model download from Hugging Face, then local inference). The plugin stores no keys and reads no `.env`, `auth.json` or other credential store.
+- **Logging:** no handler of its own. Records go to the host's log routing; set `RULE_INJECTOR_DEBUG=1` to get a stderr handler for debugging.
 - **Shell:** none. The plugin never spawns commands.
 - **Telemetry:** none. Nothing leaves the machine except the adjudicator call you opt into.
 

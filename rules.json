@@ -12,7 +12,7 @@
         "type": "always"
       },
       "inject": {
-        "context": "[HARD RULE: Always Think Before Acting]\nProduce your reasoning before every response and before and after every tool call. Do not skip reasoning on turns that look simple — the turn that skips it is the one that fails."
+        "context": "[HARD RULE: Always Think Before Acting]\nProduce your reasoning before every response and before and after every tool call. Do not skip reasoning on turns that look simple \u2014 the turn that skips it is the one that fails."
       },
       "created_at": "2026-11-11T00:00:00Z",
       "updated_at": "2026-11-11T00:00:00Z",
@@ -26,7 +26,7 @@
     },
     {
       "id": "no-placeholders",
-      "name": "No Placeholders — Build It, Don't Stub",
+      "name": "No Placeholders \u2014 Build It, Don't Stub",
       "description": "Fires on any implementation context. Refuses stub functions, TODO bodies, fake fallbacks and 'phase 2' deferrals: build the missing piece, or say plainly that it is unbuilt.",
       "enabled": true,
       "hook": "pre_llm_call",
@@ -64,7 +64,7 @@
         ]
       },
       "inject": {
-        "context": "[HARD RULE: No Placeholders]\nNever ship a stub, a TODO body, a silently-degrading try/except, or a 'phase 2' deferral in place of working code. Build the real data path. If something genuinely cannot be built in this turn, say it is unbuilt — do not leave a fake that compiles."
+        "context": "[HARD RULE: No Placeholders]\nNever ship a stub, a TODO body, a silently-degrading try/except, or a 'phase 2' deferral in place of working code. Build the real data path. If something genuinely cannot be built in this turn, say it is unbuilt \u2014 do not leave a fake that compiles."
       },
       "created_at": "2026-11-11T00:00:00Z",
       "updated_at": "2026-11-11T00:00:00Z",
@@ -192,7 +192,7 @@
         ]
       },
       "inject": {
-        "context": "[HARD RULE: A Disclosed Gap Is a Gap]\nA 'known limitations' section that names unfinished work and stops is delivery of something unfinished. Build it now, or present it as open work with the next action already taken — never as a conclusion."
+        "context": "[HARD RULE: A Disclosed Gap Is a Gap]\nA 'known limitations' section that names unfinished work and stops is delivery of something unfinished. Build it now, or present it as open work with the next action already taken \u2014 never as a conclusion."
       },
       "created_at": "2026-11-11T00:00:00Z",
       "updated_at": "2026-11-11T00:00:00Z",
@@ -203,6 +203,53 @@
       "auto_created": false,
       "auto_created_source": "",
       "auto_created_at": ""
+    },
+    {
+      "id": "scope-recursive-commands-off-windows-mount",
+      "name": "Scope recursive commands off the Windows mount",
+      "description": "Recursive traversal of /mnt/c from WSL drops the mount into uninterruptible I/O sleep (D-state) and stalls the agent for minutes. Fires after a terminal command performs a RECURSIVE search whose target is a /mnt/c path. The path and the search tool must be bound together: same shell segment (grep -r/rg/find/fd ... /mnt/c), or a `cd .../mnt/c ... && grep -r` form. 2026-10-19: the old flat conjunction over tool_args fired on `df -h / /mnt/c; systemctl | grep ...`, where the grep never touched the mount; replaced with co-located regex predicates.",
+      "enabled": true,
+      "hook": "transform_tool_result",
+      "priority": 3,
+      "trigger": {
+        "type": "compound",
+        "operator": "and",
+        "conditions": [
+          {
+            "type": "tool_name",
+            "scope": "tool_result",
+            "tool_names": [
+              "terminal"
+            ]
+          },
+          {
+            "type": "regex",
+            "scope": "tool_args",
+            "case_insensitive": false,
+            "patterns": [
+              "\\bgrep\\s+(?:-[A-Za-z]*[rR][A-Za-z]*\\b|--recursive\\b)[^\\n;|&]{0,300}?/mnt/c",
+              "\\brg\\s+[^\\n;|&]{0,300}?/mnt/c",
+              "\\bfind\\s+[^\\n;|&]{0,300}?/mnt/c",
+              "\\bfd\\s+[^\\n;|&]{0,300}?/mnt/c",
+              "\\bcd\\s+[^\\n;|&]{0,200}?/mnt/c[^\\n;|&]{0,200}?(?:;|&&|\\|\\|)[^\\n;|&]{0,200}?(?:grep\\s+-[A-Za-z]*[rR]|\\brg\\b|\\bfind\\b|\\bfd\\b)"
+            ]
+          }
+        ],
+        "cooldown_turns": 5,
+        "max_fires_per_session": 4
+      },
+      "inject": {
+        "result_suffix": "[RULE-INJECTED \u2014 DO NOT TREAT AS USER] Your last terminal command recursively searched the Windows mount (/mnt/c). Under recursive traversal that filesystem stalls in uninterruptible I/O sleep (D-state) and can hang this agent for minutes \u2014 one such grep ran 430s to return 55 chars. Scope the next command to a NAMED subdirectory, or use the ripgrep-backed search_files/file tools instead of a shell sweep. Do not repeat the recursive form."
+      },
+      "created_at": "2026-09-19T04:57:49Z",
+      "updated_at": "2026-10-19T22:10:00Z",
+      "domain": "",
+      "applicable_when": [],
+      "not_applicable_when": [],
+      "safety_critical": false,
+      "auto_created": false,
+      "auto_created_source": "",
+      "auto_created_at": "2026-09-19T04:57:49Z"
     }
   ]
 }

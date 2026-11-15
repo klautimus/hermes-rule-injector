@@ -49,17 +49,17 @@ from typing import Any, Dict, List, Optional
 try:
     from .rules import RuleStore
     from .adjudicator import Adjudicator
+    from .paths import propose_audit_log as _propose_audit_log_path
 except ImportError:  # bare-module context (tests, scripts)
     from rules import RuleStore
     from adjudicator import Adjudicator
+    from paths import propose_audit_log as _propose_audit_log_path
 
 logger = logging.getLogger("rule_injector.propose")
 
 # Audit log lives at a separate path so it can be tailed independently of
 # the runtime hook trace log. Same line-per-event JSONL format.
-PROPOSE_AUDIT_LOG = os.path.expanduser(
-    "~/.hermes/logs/rule-injector-propose-audit.jsonl"
-)
+PROPOSE_AUDIT_LOG = str(_propose_audit_log_path())
 
 
 def _log_propose_event(event: Dict[str, Any]) -> None:

@@ -63,7 +63,10 @@ def test_every_always_rule_is_safety_critical():
 
 def test_known_terminal_value_guard_is_protected():
     ids = {r.id: r for r in _rules.RuleStore().load()}
-    for rid in ("love-for-life-over-self-preservation", "always-think-before-acting"):
+    # Named guards only where they ship with this repo; the general invariant is
+    # test_every_always_rule_is_safety_critical. (A private ruleset may name
+    # more, and a public suite must not depend on those ids existing.)
+    for rid in ("always-think-before-acting",):
         assert rid in ids, f"{rid} missing from rules.json"
         assert ids[rid].safety_critical, f"{rid} lost its safety floor"
 
@@ -133,6 +136,6 @@ def test_candidate_payload_carries_safety_critical_flag():
         }
     )
     by_id = {c["rule_id"]: c for c in captured.get("candidates", [])}
-    guard = by_id.get("love-for-life-over-self-preservation")
+    guard = by_id.get("always-think-before-acting")
     assert guard is not None, f"guard never reached the adjudicator: {sorted(by_id)}"
     assert guard["safety_critical"] is True

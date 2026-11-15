@@ -28,19 +28,24 @@ try:
     from .matchers import RuleMatcher
     from .adjudicator import AdjudicationConfig, AdjudicationState, Adjudicator, PHASE1_MODEL, PHASE1_PROVIDER, PHASE1_TASK
     from .propose import propose_rule, extract_rule_draft, RULE_INJECTION_REVIEW_PROMPT  # Phase 3
+    from .paths import trace_log as _trace_log_path
 except ImportError:  # bare-module context (tests, scripts)
     from rules import RuleStore
     from matchers import RuleMatcher
     from adjudicator import AdjudicationConfig, AdjudicationState, Adjudicator, PHASE1_MODEL, PHASE1_PROVIDER, PHASE1_TASK
     from propose import propose_rule, extract_rule_draft, RULE_INJECTION_REVIEW_PROMPT  # Phase 3
+    from paths import trace_log as _trace_log_path
 
 LOGGER = logging.getLogger("rule_injector")
-if not LOGGER.handlers:
-    _h = logging.StreamHandler()
-    _h.setFormatter(logging.Formatter("%(name)s [%(levelname)s] %(message)s"))
-    LOGGER.addHandler(_h)
-    LOGGER.setLevel(logging.INFO)
-    LOGGER.propagate = True
+# No handler of our own: the host owns log routing, and a StreamHandler added
+# at import writes to stderr inside the CLI and the TUI. Opt in for debugging.
+LOGGER.setLevel(logging.INFO)
+LOGGER.propagate = True
+if os.environ.get("RULE_INJECTOR_DEBUG"):
+    if not LOGGER.handlers:
+        _h = logging.StreamHandler()
+        _h.setFormatter(logging.Formatter("%(name)s [%(levelname)s] %(message)s"))
+        LOGGER.addHandler(_h)
 
 # Module-level so the dashboard/API can find the same adjudicator instance
 # that the matcher is using. Initialized in register() so the test
@@ -52,8 +57,8 @@ adjudicator_state: dict = {
     "adjudicator": None,
 }
 
-# Trace log path
-TRACE_LOG = os.path.expanduser("~/.hermes/logs/rule-injector-trace.jsonl")
+# Trace log path — resolves through the active profile's HERMES_HOME.
+TRACE_LOG = str(_trace_log_path())
 
 def _log_activation(hook: str, rule_id: str, matched: bool, context_summary: str = "", session_id: str = ""):
     """Log rule activation for auditability."""
@@ -74,62 +79,61 @@ def _log_activation(hook: str, rule_id: str, matched: bool, context_summary: str
 
 
 def _get_session_id() -> str:
-    """Best-effort session ID extraction from Hermes runtime context."""
-    try:
-        # Try environment variable first (Hermes sets this for plugins)
-        sid = os.environ.get("HERMES_SESSION_ID", "")
-        if sid:
-            return sid
-        # Try reading from the state file
-        state_path = os.path.expanduser("~/.hermes/state.json")
-        if os.path.exists(state_path):
-            with open(state_path) as f:
-                state = json.load(f)
-            sid = state.get("session_id", "")
-            if sid:
-                return sid
-    except Exception:
-        pass
-    return "unknown"
+    """Best-effort session ID, without guessing.
+
+    Hooks receive the real ``session_id`` in kwargs; at register() time there
+    is no turn yet, and the previous env-var / state.json probes resolved to a
+    different session (or another profile's) often enough to make the trace
+    log misleading. Callers substitute "unknown".
+    """
+    return ""
 
 
-def _build_adjudicator(enabled: bool) -> Adjudicator:
+def _build_adjudicator(enabled: bool, ctx=None) -> Adjudicator:
     cfg = AdjudicationConfig(enabled=enabled, mode="review", provider=PHASE1_PROVIDER, model=PHASE1_MODEL, task=PHASE1_TASK)
     _apply_adjudicator_overrides(cfg, _read_adjudicator_overrides())
     state = AdjudicationState(trace_retention=100)
-    auxiliary_client = _load_auxiliary_client()
+    auxiliary_client = _load_auxiliary_client(ctx)
     return Adjudicator(cfg, state, auxiliary_client)
 
 
-def _load_auxiliary_client():
-    """Construct a callable that invokes auxiliary_client.call_llm.
+def _load_auxiliary_client(ctx=None):
+    """Callable that runs one bounded completion through the public plugin API.
 
-    Imported lazily so the plugin still loads in environments where the
-    hermes-agent package is not importable (the rule-injector test suite).
-    A failure to import falls back to a deterministic offline client.
+    ``ctx.llm.complete`` is the supported route: Hermes keeps the model,
+    credentials and budget, and the plugin never touches
+    ``agent.auxiliary_client`` (an internal module). Provider and model are not
+    forwarded — overriding them is gated behind per-plugin trust flags — so the
+    host's active model is used. Without a ctx (unit tests, standalone scripts)
+    a deterministic offline client keeps the plugin loadable.
     """
-    try:
-        from agent.auxiliary_client import call_llm as _call_llm
-
-        def _client(**kwargs):
-            return _call_llm(**kwargs)
+    llm = getattr(ctx, "llm", None) if ctx is not None else None
+    if llm is not None and hasattr(llm, "complete"):
+        def _client(messages=None, temperature=None, max_tokens=None, timeout=None, **_ignored):
+            result = llm.complete(
+                list(messages or []),
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout,
+            )
+            return getattr(result, "text", "") or ""
 
         return _client
-    except Exception as exc:  # noqa: BLE001
-        LOGGER.warning("adjudicator: auxiliary_client unavailable, using offline fallback: %s", exc)
 
-        def _offline(**kwargs):
-            return json.dumps(
-                {
-                    "keep": [],
-                    "drop": [],
-                    "blocked_review": [],
-                    "reason": "offline_fallback",
-                    "overall_confidence": 0.0,
-                }
-            )
+    LOGGER.debug("adjudicator: no plugin LLM context, using offline fallback")
 
-        return _offline
+    def _offline(**kwargs):
+        return json.dumps(
+            {
+                "keep": [],
+                "drop": [],
+                "blocked_review": [],
+                "reason": "offline_fallback",
+                "overall_confidence": 0.0,
+            }
+        )
+
+    return _offline
 
 
 def _read_adjudicator_config_from_yaml() -> bool:
@@ -222,7 +226,7 @@ def register(ctx):
     )
     _apply_adjudicator_overrides(config, _read_adjudicator_overrides())
     state = AdjudicationState(trace_retention=100)
-    adjudicator = Adjudicator(config, state, _load_auxiliary_client())
+    adjudicator = Adjudicator(config, state, _load_auxiliary_client(ctx))
     matcher = RuleMatcher(store, adjudicator=adjudicator)
     # Make the live state reachable from the dashboard/API.
     adjudicator_state["config"] = config
@@ -237,8 +241,6 @@ def register(ctx):
     try:
         import logging
         _reg_logger = logging.getLogger("rule_injector")
-        if not _reg_logger.handlers:
-            _reg_logger.addHandler(logging.StreamHandler())
         _reg_logger.info(
             "rule-injector loaded fallback_session=%s pid=%d rules=%d",
             _fallback_sid, os.getpid(), len(store.load())

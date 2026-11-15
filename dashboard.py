@@ -25,7 +25,13 @@ from typing import Any, Dict, List
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_RULES = os.path.join(HERE, "rules.json")
-DEFAULT_TRACE = os.path.expanduser("~/.hermes/logs/rule-injector-trace.jsonl")
+
+try:  # run as a script from the plugin directory
+    from paths import trace_log as _trace_log_path
+except ImportError:  # package context
+    from .paths import trace_log as _trace_log_path
+
+DEFAULT_TRACE = str(_trace_log_path())
 
 
 def load_rules(path: str) -> List[Dict[str, Any]]:

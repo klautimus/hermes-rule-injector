@@ -36,19 +36,19 @@ except ImportError:  # standalone/legacy import path (tests, scripts run from pl
     import domain_inference
 
 # Persistent verdict log: every adjudicator decision is appended to a 48h
-# JSONL file at ~/.hermes/logs/rule-injector-adjudicator-verdicts.jsonl so
-# we can audit "what did the LLM see and decide" without relying on the
-# in-memory deque. The script `audit-adjudicator.py` lives next to this
-# module under ~/.hermes/scripts/.
-_ADJUDICATOR_LOG_DIR = Path.home() / ".hermes" / "scripts"
-try:
-    if str(_ADJUDICATOR_LOG_DIR) not in sys.path:
-        sys.path.insert(0, str(_ADJUDICATOR_LOG_DIR))
-    import adjudicator_verdict_log as _adj_verdict_log  # type: ignore
-except Exception as _e:  # noqa: BLE001
-    # Don't block plugin load if the helper script isn't present yet.
-    _adj_verdict_log = None  # type: ignore
-    logger.warning("adjudicator_verdict_log helper not importable: %s", _e)
+# JSONL file under the active Hermes home's logs/ directory so we can audit
+# "what did the LLM see and decide" without relying on the in-memory deque.
+# The logger ships with the plugin (verdict_log.py); the path resolves
+# through paths.py so a profile's HERMES_HOME is honoured.
+try:  # package context (gateway loads the plugin as a package)
+    from . import verdict_log as _adj_verdict_log  # type: ignore
+except ImportError:  # bare-module context (tests, scripts run from the plugin root)
+    try:
+        import verdict_log as _adj_verdict_log  # type: ignore
+    except ImportError as _e:  # noqa: BLE001
+        # Don't block plugin load if the module is missing.
+        _adj_verdict_log = None  # type: ignore
+        logger.warning("verdict_log not importable: %s", _e)
 
 INJECTION_CHAR_BUDGET = 50000
 
@@ -524,10 +524,10 @@ class CompiledRule:
         Uses max-similarity across multiple reference phrases. Returns False
         gracefully if model is unavailable or import fails.
         """
-        import sys
-        import os
-        sys.path.insert(0, os.path.dirname(__file__))
-        from semantic_matcher import SemanticMatcher
+        try:
+            from .semantic_matcher import SemanticMatcher
+        except ImportError:  # bare-module context
+            from semantic_matcher import SemanticMatcher
 
         matcher = SemanticMatcher.get_instance()
         if matcher is None or not matcher.is_available():
@@ -1139,7 +1139,11 @@ class RuleMatcher:
             session_id, task_id, user_msg,
             bool(kwargs.get("is_cron", False)),
         )
-        # Extract recent context (last 4 messages) for keyword matching
+        # Extract recent context (last 4 messages) for keyword matching.
+        # Core's pre_verify contract passes final_response (and changed_paths),
+        # NOT conversation_history, so history is usually empty here: fall back
+        # to the draft response, otherwise every `recent_context` rule is dead
+        # on this hook.
         recent_parts = []
         for m in (history or [])[-4:]:
             if isinstance(m, dict):
@@ -1147,6 +1151,8 @@ class RuleMatcher:
                 if isinstance(content, str) and content.strip():
                     recent_parts.append(content[:500])
         recent = " ".join(recent_parts)
+        if not recent.strip():
+            recent = (kwargs.get("final_response", "") or "")[:2000]
 
         # Detect skills loaded this session (incremental)
         skills_loaded = self._detect_skills_loaded_incremental(history)
@@ -1209,8 +1215,15 @@ class RuleMatcher:
                 extra_context=extra_context,
             )
             if blocks:
+                # Core's contract (hermes_cli/plugins.get_pre_verify_continue_message)
+                # only fires on {"action": "continue"|"block", "message": <str>}.
+                # Returning blocks alone silently never stopped a turn, which is
+                # why this gate never fired. The joined message is what the agent
+                # reads; `blocks` is kept for programmatic callers and tests.
+                joined = "\n\n".join(text for text, _, _ in blocks)
                 return {
                     "action": "continue",
+                    "message": joined,
                     "blocks": [{"rule_id": rid, "message": text} for text, _, rid in blocks],
                 }
         return {}
